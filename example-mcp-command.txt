@@ -1,0 +1,2 @@
+#copy this fle as mcp-command.txt and put your command here
+npx -y @elastic/mcp-server-elasticsearch
