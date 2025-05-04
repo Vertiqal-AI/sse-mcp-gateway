@@ -1,13 +1,3 @@
-npx -y @elastic/mcp-server-elasticsearch
- ^C
- ^C
- cat .env 
-ES_URL=https://es.localhost.localdomain
-ES_USERNAME=elastic
-ES_PASSWORD=OXLK4Dwh
- 
- 
- cat sse-mcp-gateway.js 
 #!/usr/bin/env node
 
 import { spawn } from "child_process";
