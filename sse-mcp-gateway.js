@@ -7,75 +7,51 @@ import dotenv from "dotenv";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
-// Load environment variables from Railway's variable manager
 dotenv.config();
 
-// --- API Key Cleaning and Validation ---
+// --- API Key Validation ---
 let cleanApiKey = '';
 const dirtyApiKey = process.env.AIRTABLE_API_KEY || '';
-
-if (dirtyApiKey) {
-  const patIndex = dirtyApiKey.indexOf('pat');
-  if (patIndex !== -1) {
-    cleanApiKey = dirtyApiKey.substring(patIndex);
-    console.log(`✅ API Key Loaded and Cleaned.`);
-  } else {
-    console.error(`❌ FATAL: Could not find 'pat...' sequence in AIRTABLE_API_KEY.`);
-    process.exit(1);
-  }
+if (dirtyApiKey && dirtyApiKey.includes('pat')) {
+  cleanApiKey = dirtyApiKey.substring(dirtyApiKey.indexOf('pat'));
+  console.log(`✅ API Key Loaded and Cleaned.`);
 } else {
-  console.error('❌ FATAL: AIRTABLE_API_KEY is NOT DEFINED in environment! Please set it in Railway.');
+  console.error('❌ FATAL: AIRTABLE_API_KEY is not defined or is invalid! Please set it in Railway.');
   process.exit(1);
 }
 
-// --- Define the command to run the pre-built MCP server ---
+// --- Spawn MCP Server ---
 const command = 'node';
 const mcpScriptPath = './airtable-mcp-src/build/index.js';
 const args = [ mcpScriptPath ];
-
 console.log(`Spawning MCP process with command: ${command} ${args[0]}`);
 
 const mcp = spawn(command, args, {
   stdio: ["pipe", "pipe", "pipe"],
-  env: {
-    ...process.env,
-    'AIRTABLE_API_KEY': cleanApiKey
-  }
+  env: { ...process.env, 'AIRTABLE_API_KEY': cleanApiKey }
 });
 
 // --- Child Process Event Handlers ---
-mcp.stderr.on("data", (data) => {
-  console.error(`MCP stderr: ${data.toString()}`);
-});
+mcp.stderr.on("data", (data) => console.error(`MCP stderr: ${data.toString()}`));
+mcp.on("close", (code) => console.log(`MCP process exited with code ${code}`));
+mcp.on('error', (err) => console.error('Failed to start MCP subprocess.', err));
 
-mcp.on("close", (code) => {
-  console.log(`MCP process exited with code ${code}`);
-});
-
-mcp.on('error', (err) => {
-  console.error('Failed to start MCP subprocess.', err);
-});
-
-// --- Setup Express and the Main MCP Server Instance ---
+// --- Setup Express and MCP Server Instance ---
 const app = express();
 const PORT = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.text({ type: "*/*" }));
 
-// Create a dummy MCP Server instance to manage transport lifecycles
 const mcpServer = new Server(
   { name: "sse-proxy-server", version: "1.0.0" },
   { capabilities: { tools: {} } }
 );
 
 // --- Handle HTTP Endpoints ---
-
-// When a client connects, create a new transport and connect it to our server instance
 app.get("/sse", async (req, res) => {
   console.log("New SSE connection received.");
   const transport = new SSEServerTransport("/message", res);
   try {
-    // This correctly registers the connection and handles its lifecycle
     await mcpServer.connect(transport);
     console.log("SSE transport successfully connected to the server instance.");
   } catch (e) {
@@ -83,7 +59,6 @@ app.get("/sse", async (req, res) => {
   }
 });
 
-// When a message is posted, write it to the child process stdin
 app.post("/message", async (req, res) => {
   if (mcp.stdin.writable) {
     try {
@@ -99,19 +74,26 @@ app.post("/message", async (req, res) => {
 });
 
 // --- Handle Data from the Child Process ---
-
-// When we get data from the MCP server's stdout...
+// Use a buffer to handle streaming data robustly
+let stdoutBuffer = '';
 mcp.stdout.on("data", (data) => {
-  const lines = data.toString().split("\n").filter(Boolean);
-  for (const line of lines) {
-    try {
-      const json = JSON.parse(line);
-      // ...broadcast it through the server instance. The SDK will handle sending
-      // it to all valid, connected clients. This fixes the "Not connected" error.
-      mcpServer.broadcast(json);
-      console.log("Broadcasting message from MCP to connected clients.");
-    } catch (err) {
-      console.error("Invalid JSON received from MCP stdout:", line);
+  stdoutBuffer += data.toString();
+  let newlineIndex;
+
+  // Process every complete line (ending in a newline) in the buffer
+  while ((newlineIndex = stdoutBuffer.indexOf('\n')) !== -1) {
+    const line = stdoutBuffer.substring(0, newlineIndex).trim();
+    // Keep the rest of the buffer for the next data chunk
+    stdoutBuffer = stdoutBuffer.substring(newlineIndex + 1);
+
+    if (line) { // Only process non-empty lines
+      try {
+        const json = JSON.parse(line);
+        mcpServer.broadcast(json);
+        console.log("Broadcasting message from MCP to connected clients.");
+      } catch (err) {
+        console.error("Invalid JSON received from MCP stdout:", line);
+      }
     }
   }
 });
