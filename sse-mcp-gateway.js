@@ -123,80 +123,23 @@ mcp.stdout.on("data", (data) => {
 // 5. Define HTTP endpoints
 app.get("/sse", async (req, res) => {
   console.log("New SSE connection.");
+  app.use('/sse', (req, res, next) => {
+  console.log('Method:', req.method);
+  console.log('URL:', req.url);
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('Body:', req.body);
+  console.log("#########################")
+  const apiKey = req.headers['x-api-key'];
+  console.log('Received headers:', req.headers);
+  console.log('API Key:', apiKey);
+  next();
+});
   transport = new SSEServerTransport("/message", res);
   await server.connect(transport);
 });
 
 app.post("/message", async (req, res) => {
-  if (mcp.stdin.writable) {
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-console.log("Loop Starting ########################");
-console.log("--- Searching entire 'req' object for 'x-api-key' ---");
-
-  /**
-   * Recursively searches for a key within a nested object.
-   * @param {object} objectToSearch - The object to search inside (e.g., req).
-   * @param {string} targetKey - The key we are looking for (e.g., 'x-api-key').
-   * @param {string} currentPath - The string representing the current path.
-   * @param {Set} visited - A set to track visited objects to prevent infinite loops from circular references.
-   */
-  function findKeyPath(objectToSearch, targetKey, currentPath = 'req', visited = new Set()) {
-    // Stop if the object is null or not an object, or if we've seen it before.
-    if (objectToSearch === null || typeof objectToSearch !== 'object' || visited.has(objectToSearch)) {
-      return;
-    }
-    
-    // Mark the current object as visited to avoid infinite loops.
-    visited.add(objectToSearch);
-
-    // Loop through all keys in the current object
-    for (const key in objectToSearch) {
-      // Check only properties that belong to this object
-      if (Object.prototype.hasOwnProperty.call(objectToSearch, key)) {
-        const newPath = `${currentPath}.${key}`;
-        
-        // --- MATCH FOUND ---
-        // HTTP headers are case-insensitive, so we compare in lowercase.
-        if (key.toLowerCase() === targetKey.toLowerCase()) {
-          console.log(`\n!!! SUCCESS: Found key '${key}' at path: ${newPath} !!!`);
-          console.log(`Value: ${objectToSearch[key]}\n`);
-        }
-
-        // --- RECURSIVE STEP ---
-        // If the value of the current key is another object, search inside it.
-        const value = objectToSearch[key];
-        if (typeof value === 'object') {
-          findKeyPath(value, targetKey, newPath, visited);
-        }
-      }
-    }
-  }
-
-  // Start the search from the top-level 'req' object.
-  findKeyPath(req, 'x-api-key');
-
-  console.log("--- Search Complete ---");
-
-
-
-
-
-
-
-    
+  if (mcp.stdin.writable) {   
     const singleLineJson = JSON.stringify(JSON.parse(req.body));
     mcp.stdin.write(singleLineJson + "\n");
     res.sendStatus(202);
