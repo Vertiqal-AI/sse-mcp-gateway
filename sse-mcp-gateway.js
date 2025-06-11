@@ -5,7 +5,6 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
 dotenv.config();
 
@@ -36,28 +35,30 @@ mcp.stderr.on("data", (data) => console.error(`MCP stderr: ${data.toString()}`))
 mcp.on("close", (code) => console.log(`MCP process exited with code ${code}`));
 mcp.on('error', (err) => console.error('Failed to start MCP subprocess.', err));
 
-// --- Setup Express and MCP Server Instance ---
+// --- Setup Express Server ---
 const app = express();
 const PORT = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.text({ type: "*/*" }));
 
-// This Server instance correctly manages connection state
-const mcpServer = new Server(
-  { name: "sse-proxy-server", version: "1.0.0" },
-  { capabilities: { tools: {} } }
-);
+// --- Manually Manage a List of Connected Clients ---
+// This is a robust way to handle multiple connections.
+const connectedClients = new Set();
 
 // --- Handle HTTP Endpoints ---
-app.get("/sse", async (req, res) => {
-  console.log("New SSE connection received.");
+app.get("/sse", (req, res) => {
+  console.log("New SSE client connected.");
   const transport = new SSEServerTransport("/message", res);
-  try {
-    await mcpServer.connect(transport);
-    console.log("SSE transport successfully connected to the server instance.");
-  } catch (e) {
-    console.error("Error connecting SSE transport:", e);
-  }
+  
+  // Add the new client to our active set
+  connectedClients.add(transport);
+  console.log(`Client added. Total clients: ${connectedClients.size}`);
+
+  // When the client disconnects, remove them from the set
+  req.on('close', () => {
+    connectedClients.delete(transport);
+    console.log(`Client disconnected. Total clients: ${connectedClients.size}`);
+  });
 });
 
 app.post("/message", async (req, res) => {
@@ -75,13 +76,11 @@ app.post("/message", async (req, res) => {
 });
 
 // --- Handle Data from the Child Process ---
-// Use a buffer to handle streaming data robustly
 let stdoutBuffer = '';
 mcp.stdout.on("data", (data) => {
   stdoutBuffer += data.toString();
   let newlineIndex;
 
-  // Process every complete line (ending in a newline) in the buffer
   while ((newlineIndex = stdoutBuffer.indexOf('\n')) !== -1) {
     const line = stdoutBuffer.substring(0, newlineIndex).trim();
     stdoutBuffer = stdoutBuffer.substring(newlineIndex + 1);
@@ -89,12 +88,14 @@ mcp.stdout.on("data", (data) => {
     if (line) {
       try {
         const json = JSON.parse(line);
-        // This is the fix. We use the server instance to broadcast,
-        // which prevents the "Not connected" crash.
-        mcpServer.broadcast(json);
-        console.log("Broadcasting message from MCP to connected clients.");
+        
+        // Loop through all currently connected clients and send them the data
+        console.log(`Broadcasting message to ${connectedClients.size} client(s).`);
+        for (const client of connectedClients) {
+          client.send(json);
+        }
       } catch (err) {
-        console.error(`Error parsing line from MCP stdout. Error: ${err.message}. Line was:`, line);
+        console.error("Error parsing or broadcasting line from MCP stdout:", line);
       }
     }
   }
