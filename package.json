@@ -1,9 +1,10 @@
 {
-  "name": "elastic-mcp-sse",
+  "name": "sse-mcp-gateway",
   "version": "1.0.0",
   "type": "module",
-  "main": "index.js",
+  "main": "sse-mcp-gateway.js",
   "scripts": {
+    "start": "node sse-mcp-gateway.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -13,7 +14,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.1",
     "cors": "^2.8.5",
-    "express": "^5.1.0",
-    "mcp-server-and-gw": "^1.0.1"
+    "dotenv": "^16.4.5",
+    "express": "^5.1.0"
   }
 }
