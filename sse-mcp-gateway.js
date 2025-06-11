@@ -30,74 +30,97 @@ const mcp = spawn(command, args, {
   env: { ...process.env, 'AIRTABLE_API_KEY': cleanApiKey }
 });
 
-// --- Child Process Event Handlers ---
-mcp.stderr.on("data", (data) => console.error(`MCP stderr: ${data.toString()}`));
-mcp.on("close", (code) => console.log(`MCP process exited with code ${code}`));
-mcp.on('error', (err) => console.error('Failed to start MCP subprocess.', err));
+// Listen for errors from the MCP process
+mcp.stderr.on("data", (data) => {
+  console.error(`MCP stderr: ${data.toString()}`);
+});
 
-// --- Setup Express Server ---
+// Listen for when the MCP process closes
+mcp.on("close", (code) => {
+  console.log(`MCP process exited with code ${code}`);
+});
+
+// Listen for spawn errors (e.g., command not found)
+mcp.on('error', (err) => {
+  console.error('Failed to start MCP subprocess.', err);
+});
+
+// 3. Setup Express and SSE transport
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 8808;
 app.use(cors());
 app.use(express.text({ type: "*/*" }));
 
-// --- Manually Manage a List of Connected Clients ---
-// This is a robust way to handle multiple connections.
-const connectedClients = new Set();
+let transport;
 
-// --- Handle HTTP Endpoints ---
-app.get("/sse", (req, res) => {
-  console.log("New SSE client connected.");
-  const transport = new SSEServerTransport("/message", res);
-  
-  // Add the new client to our active set
-  connectedClients.add(transport);
-  console.log(`Client added. Total clients: ${connectedClients.size}`);
+const server = new Server(
+  { name: "GenericMCP-Gateway", version: "0.1.0" },
+  {
+    capabilities: {
+      resources: {},
+      tools: {},
+      templates: {},
+    },
+  }
+);
 
-  // When the client disconnects, remove them from the set
-  req.on('close', () => {
-    connectedClients.delete(transport);
-    console.log(`Client disconnected. Total clients: ${connectedClients.size}`);
-  });
+// 4. Forward stdout → SSE
+mcp.stdout.on("data", (data) => {
+  console.log(`Received data from MCP stdout: ${data.toString()}`); // Added for logging
+  const lines = data.toString().split("\n").filter(Boolean);
+  for (const line of lines) {
+    try {
+      const json = JSON.parse(line);
+
+      // Normalize content format
+      if (json.result?.content) {
+        const rawContent = Array.isArray(json.result.content)
+          ? json.result.content
+          : [json.result.content];
+
+        const joinedText = rawContent.map((entry) => {
+          if (typeof entry === "string") {
+            try {
+              const parsed = JSON.parse(entry);
+              return JSON.stringify(parsed, null, 2);
+            } catch {
+              return entry;
+            }
+          }
+
+          if (typeof entry === "object" && typeof entry.text === "string") {
+            return entry.text;
+          }
+
+          return JSON.stringify(entry, null, 2);
+        }).join("\n\n");
+
+        json.result.content = "```\n" + joinedText + "\n```";
+      }
+
+      transport?.send(json);
+    } catch (err) {
+      console.error("Invalid JSON from MCP:", line);
+    }
+  }
+});
+
+// 5. Define HTTP endpoints
+app.get("/sse", async (req, res) => {
+  console.log("New SSE connection.");
+  transport = new SSEServerTransport("/message", res);
+  await server.connect(transport);
 });
 
 app.post("/message", async (req, res) => {
   if (mcp.stdin.writable) {
-    try {
-      const singleLineJson = JSON.stringify(JSON.parse(req.body));
-      mcp.stdin.write(singleLineJson + "\n");
-      res.sendStatus(202);
-    } catch (e) {
-      res.status(400).send("Invalid JSON");
-    }
+    console.log(`Writing to MCP stdin: ${req.body}`);
+    const singleLineJson = JSON.stringify(JSON.parse(req.body));
+    mcp.stdin.write(singleLineJson + "\n");
+    res.sendStatus(202);
   } else {
+    console.error("Attempted to write to a closed MCP stdin.");
     res.status(500).send("MCP stdin closed");
-  }
-});
-
-// --- Handle Data from the Child Process ---
-let stdoutBuffer = '';
-mcp.stdout.on("data", (data) => {
-  stdoutBuffer += data.toString();
-  let newlineIndex;
-
-  while ((newlineIndex = stdoutBuffer.indexOf('\n')) !== -1) {
-    const line = stdoutBuffer.substring(0, newlineIndex).trim();
-    stdoutBuffer = stdoutBuffer.substring(newlineIndex + 1);
-
-    if (line) {
-      try {
-        const json = JSON.parse(line);
-        
-        // Loop through all currently connected clients and send them the data
-        console.log(`Broadcasting message to ${connectedClients.size} client(s).`);
-        for (const client of connectedClients) {
-          client.send(json);
-        }
-      } catch (err) {
-        console.error("Error parsing or broadcasting line from MCP stdout:", line);
-      }
-    }
   }
 });
 
