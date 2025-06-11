@@ -14,7 +14,7 @@ RUN git clone https://github.com/felores/airtable-mcp.git .
 # Install ALL dependencies (including dev) and build the final JavaScript
 RUN npm install
 RUN npm run build
-
+RUN node build/index.js 
 
 # --- Stage 2: Build the Final Gateway Application ---
 # Start from a fresh, clean Node image for our production app
