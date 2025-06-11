@@ -4,105 +4,96 @@ import { spawn } from "child_process";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import fs from "fs";
-import path from "path";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
-// Load .env variables (if provided)
-const envFilePath = process.argv[3] || ".env";
-if (fs.existsSync(envFilePath)) {
-  dotenv.config({ path: envFilePath });
+// Load environment variables from Railway's variable manager
+dotenv.config();
+
+// --- API Key Cleaning and Validation ---
+let cleanApiKey = '';
+const dirtyApiKey = process.env.AIRTABLE_API_KEY || '';
+
+if (dirtyApiKey) {
+  const patIndex = dirtyApiKey.indexOf('pat');
+  if (patIndex !== -1) {
+    cleanApiKey = dirtyApiKey.substring(patIndex);
+    console.log(`✅ API Key Loaded and Cleaned.`);
+  } else {
+    console.error(`❌ FATAL: Could not find 'pat...' sequence in AIRTABLE_API_KEY.`);
+    process.exit(1); // Exit if the key format is wrong
+  }
+} else {
+  console.error('❌ FATAL: AIRTABLE_API_KEY is NOT DEFINED in environment! Please set it in Railway.');
+  process.exit(1); // Exit if the key is missing
 }
 
-// 1. Read MCP launch command from config file
-const configPath = process.argv[2] || "mcp-command.txt";
-if (!fs.existsSync(configPath)) {
-  console.error(`Missing MCP command file: ${configPath}`);
-  process.exit(1);
-}
+// --- Define the command to run the pre-built MCP server ---
+const command = 'node';
+// This path now correctly matches the final location from our Dockerfile
+const mcpScriptPath = './airtable-mcp-src/build/index.js';
+const args = [ mcpScriptPath ]; // We pass the key via 'env' now
 
-const mcpCommand = fs.readFileSync(configPath, "utf8").trim().split(" ");
-const [command, ...args] = mcpCommand;
+console.log(`Spawning MCP process with command: ${command} ${args[0]}`);
 
-// 2. Spawn the MCP process
 const mcp = spawn(command, args, {
-  env: { ...process.env },
   stdio: ["pipe", "pipe", "pipe"],
+  // This is the correct way to pass the key to the original MCP server code
+  env: {
+    ...process.env,
+    'AIRTABLE_API_KEY': cleanApiKey
+  }
 });
 
-// 3. Setup Express and SSE transport
+// Listen for errors from the MCP process
+mcp.stderr.on("data", (data) => {
+  console.error(`MCP stderr: ${data.toString()}`);
+});
+
+mcp.on("close", (code) => {
+  console.log(`MCP process exited with code ${code}`);
+});
+
+mcp.on('error', (err) => {
+  console.error('Failed to start MCP subprocess.', err);
+});
+
+
+// --- Setup Express and SSE transport ---
 const app = express();
-const PORT = process.env.PORT || 8808;
+const PORT = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.text({ type: "*/*" }));
 
 let transport;
 
-const server = new Server(
-  { name: "GenericMCP-Gateway", version: "0.1.0" },
-  {
-    capabilities: {
-      resources: {},
-      tools: {},
-      templates: {},
-    },
-  }
-);
+app.get("/sse", (req, res) => {
+  console.log("New SSE connection.");
+  transport = new SSEServerTransport("/message", res);
+});
 
-// 4. Forward stdout → SSE
+app.post("/message", async (req, res) => {
+  if (mcp.stdin.writable) {
+    try {
+        const singleLineJson = JSON.stringify(JSON.parse(req.body));
+        mcp.stdin.write(singleLineJson + "\n");
+        res.sendStatus(202);
+    } catch(e) {
+        res.status(400).send("Invalid JSON");
+    }
+  } else {
+    res.status(500).send("MCP stdin closed");
+  }
+});
+
 mcp.stdout.on("data", (data) => {
   const lines = data.toString().split("\n").filter(Boolean);
   for (const line of lines) {
     try {
       const json = JSON.parse(line);
-
-      // Normalize content format
-      if (json.result?.content) {
-        const rawContent = Array.isArray(json.result.content)
-          ? json.result.content
-          : [json.result.content];
-
-        const joinedText = rawContent.map((entry) => {
-          if (typeof entry === "string") {
-            try {
-              const parsed = JSON.parse(entry);
-              return JSON.stringify(parsed, null, 2);
-            } catch {
-              return entry;
-            }
-          }
-
-          if (typeof entry === "object" && typeof entry.text === "string") {
-            return entry.text;
-          }
-
-          return JSON.stringify(entry, null, 2);
-        }).join("\n\n");
-
-        json.result.content = "```\n" + joinedText + "\n```";
-      }
-
       transport?.send(json);
     } catch (err) {
       console.error("Invalid JSON from MCP:", line);
     }
-  }
-});
-
-// 5. Define HTTP endpoints
-app.get("/sse", async (req, res) => {
-  console.log("New SSE connection.");
-  transport = new SSEServerTransport("/message", res);
-  await server.connect(transport);
-});
-
-app.post("/message", async (req, res) => {
-  if (mcp.stdin.writable) {
-    mcp.stdin.write(req.body + "\n");
-    res.sendStatus(202);
-  } else {
-    res.status(500).send("MCP stdin closed");
   }
 });
 
