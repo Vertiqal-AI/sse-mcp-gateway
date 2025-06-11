@@ -129,18 +129,6 @@ app.get("/sse", async (req, res) => {
 
 app.post("/message", async (req, res) => {
   if (mcp.stdin.writable) {   
-    
-  console.log('Method:', req.method);
-  console.log('URL:', req.url);
-  console.log('Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('Body:', req.body);
-  console.log("#########################")
-  const apiKey = req.headers['x-api-key'];
-  console.log('Received headers:', req.headers);
-  console.log('API Key:', apiKey);
-  next();
-
-    
     const singleLineJson = JSON.stringify(JSON.parse(req.body));
     mcp.stdin.write(singleLineJson + "\n");
     res.sendStatus(202);
