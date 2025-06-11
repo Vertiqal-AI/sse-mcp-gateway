@@ -5,6 +5,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
 // Load environment variables from Railway's variable manager
 dotenv.config();
@@ -42,78 +43,76 @@ const mcp = spawn(command, args, {
   }
 });
 
-// --- Enhanced Child Process Debugging ---
+// --- Child Process Event Handlers ---
 mcp.stderr.on("data", (data) => {
-  // The MCP server prints its "running" message to stderr, so this is important
-  console.error(`[DEBUG] MCP stderr: ${data.toString()}`);
+  console.error(`MCP stderr: ${data.toString()}`);
 });
 
 mcp.on("close", (code) => {
-  console.log(`[DEBUG] MCP process exited with code ${code}`);
+  console.log(`MCP process exited with code ${code}`);
 });
 
 mcp.on('error', (err) => {
-  console.error('[DEBUG] Failed to start MCP subprocess.', err);
+  console.error('Failed to start MCP subprocess.', err);
 });
-// -----------------------------------------
 
-
-// --- Setup Express and SSE transport ---
+// --- Setup Express and the Main MCP Server Instance ---
 const app = express();
 const PORT = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.text({ type: "*/*" }));
 
-let transport;
+// Create a dummy MCP Server instance to manage transport lifecycles
+const mcpServer = new Server(
+  { name: "sse-proxy-server", version: "1.0.0" },
+  { capabilities: { tools: {} } }
+);
 
-app.get("/sse", (req, res) => {
-  console.log("[DEBUG] A client is connecting to /sse...");
-  transport = new SSEServerTransport("/message", res);
-  console.log("[DEBUG] SSE transport object created. Ready to send data to client.");
-  
-  // Keep connection alive
-  req.on('close', () => {
-    console.log("[DEBUG] SSE client disconnected.");
-    transport = null; // Clear the transport when client disconnects
-  });
+// --- Handle HTTP Endpoints ---
+
+// When a client connects, create a new transport and connect it to our server instance
+app.get("/sse", async (req, res) => {
+  console.log("New SSE connection received.");
+  const transport = new SSEServerTransport("/message", res);
+  try {
+    // This correctly registers the connection and handles its lifecycle
+    await mcpServer.connect(transport);
+    console.log("SSE transport successfully connected to the server instance.");
+  } catch (e) {
+    console.error("Error connecting SSE transport:", e);
+  }
 });
 
+// When a message is posted, write it to the child process stdin
 app.post("/message", async (req, res) => {
-  console.log("[DEBUG] Received POST to /message with body:", req.body);
   if (mcp.stdin.writable) {
     try {
-        const singleLineJson = JSON.stringify(JSON.parse(req.body));
-        console.log("[DEBUG] Writing to MCP stdin:", singleLineJson);
-        mcp.stdin.write(singleLineJson + "\n");
-        res.sendStatus(202);
-    } catch(e) {
-        console.error("[DEBUG] Error parsing JSON in /message:", e.message);
-        res.status(400).send("Invalid JSON");
+      const singleLineJson = JSON.stringify(JSON.parse(req.body));
+      mcp.stdin.write(singleLineJson + "\n");
+      res.sendStatus(202);
+    } catch (e) {
+      res.status(400).send("Invalid JSON");
     }
   } else {
-    console.error("[DEBUG] Attempted to write to MCP stdin, but it was closed.");
     res.status(500).send("MCP stdin closed");
   }
 });
 
-// This is the most important handler for seeing results
+// --- Handle Data from the Child Process ---
+
+// When we get data from the MCP server's stdout...
 mcp.stdout.on("data", (data) => {
-  console.log(`[DEBUG] Received data from MCP stdout:\n${data.toString()}`);
-  
-  // Check if a client is connected before trying to send
-  if (transport) {
-    console.log("[DEBUG] SSE client is connected. Forwarding data...");
-    const lines = data.toString().split("\n").filter(Boolean);
-    for (const line of lines) {
-      try {
-        const json = JSON.parse(line);
-        transport.send(json);
-      } catch (err) {
-        console.error("[DEBUG] Error parsing JSON from MCP stdout:", line);
-      }
+  const lines = data.toString().split("\n").filter(Boolean);
+  for (const line of lines) {
+    try {
+      const json = JSON.parse(line);
+      // ...broadcast it through the server instance. The SDK will handle sending
+      // it to all valid, connected clients. This fixes the "Not connected" error.
+      mcpServer.broadcast(json);
+      console.log("Broadcasting message from MCP to connected clients.");
+    } catch (err) {
+      console.error("Invalid JSON received from MCP stdout:", line);
     }
-  } else {
-    console.warn("[DEBUG] Received data from MCP, but NO SSE client is connected. Data was dropped.");
   }
 });
 
