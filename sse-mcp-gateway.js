@@ -9,21 +9,9 @@ import path from "path";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
-// Load .env variables (if provided)
-const envFilePath = process.argv[3] || ".env";
-if (fs.existsSync(envFilePath)) {
-  dotenv.config({ path: envFilePath });
-}
 
-// 1. Read MCP launch command from config file
-const configPath = process.argv[2] || "mcp-command.txt";
-if (!fs.existsSync(configPath)) {
-  console.error(`Missing MCP command file: ${configPath}`);
-  process.exit(1);
-}
-
-const mcpCommand = fs.readFileSync(configPath, "utf8").trim().split(" ");
-const [command, ...args] = mcpCommand;
+const command = 'npx' ;
+const args = ['-y', '@felores/airtable-mcp-server'];
 
 let dirtyApiKey = process.env.AIRTABLE_API_KEY || '';
 let cleanApiKey = '';
