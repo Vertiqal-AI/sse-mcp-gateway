@@ -129,7 +129,7 @@ app.get("/sse", async (req, res) => {
 
 app.post("/message", async (req, res) => {
   if (mcp.stdin.writable) {
-    console.log(`Writing to MCP stdin: ${req.body}`);
+    console.log(`Writing to MCP stdin: ${req}`);
     const singleLineJson = JSON.stringify(JSON.parse(req.body));
     mcp.stdin.write(singleLineJson + "\n");
     res.sendStatus(202);
