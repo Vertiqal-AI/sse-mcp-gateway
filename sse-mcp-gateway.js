@@ -129,8 +129,60 @@ app.get("/sse", async (req, res) => {
 
 app.post("/message", async (req, res) => {
   if (mcp.stdin.writable) {
-    console.log("Request Headers:", req.headers);
-    console.log("Request Body:", req.body);
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+console.log("Loop Starting ########################")
+    for (const key in req) {
+      console.log(key)
+    // We want to make sure we are only looking at properties owned by the object itself
+    if (Object.prototype.hasOwnProperty.call(req, key)) {
+      const value = req[key];
+      const type = typeof value;
+
+      let valueToPrint;
+
+      // Decide how to print the value based on its type
+      if (type === 'object' && value !== null) {
+        // For objects (like headers, body, query), we try to convert them to a JSON string.
+        // This is safer than logging the object directly.
+        try {
+          valueToPrint = JSON.stringify(value);
+        } catch (error) {
+          // This will catch errors from circular references (e.g., in req.socket)
+          valueToPrint = `[Complex Object - Cannot be stringified]`;
+        }
+      } else if (type === 'function') {
+        valueToPrint = `[Function: ${value.name}]`;
+      } else {
+        // For simple types like strings, numbers, booleans
+        valueToPrint = value;
+      }
+      
+      console.log(`Key: "${key}", Type: "${type}", Value:`, valueToPrint);
+    }
+  }
+
+  console.log("--- Finished Full Inspection of 'req' Object ---");
+
+
+
+
+
+
+
+    
     const singleLineJson = JSON.stringify(JSON.parse(req.body));
     mcp.stdin.write(singleLineJson + "\n");
     res.sendStatus(202);
