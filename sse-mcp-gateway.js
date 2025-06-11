@@ -124,6 +124,7 @@ mcp.stdout.on("data", (data) => {
 app.get("/sse", async (req, res) => {
   console.log("New SSE connection.");
   transport = new SSEServerTransport("/message", res);
+  console.log(res)
   await server.connect(transport);
 });
 
