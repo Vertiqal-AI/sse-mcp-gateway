@@ -143,38 +143,52 @@ app.post("/message", async (req, res) => {
 
 
 
-console.log("Loop Starting ########################")
-    for (const key in req) {
-      console.log(key)
-    // We want to make sure we are only looking at properties owned by the object itself
-    if (Object.prototype.hasOwnProperty.call(req, key)) {
-      const value = req[key];
-      const type = typeof value;
+console.log("Loop Starting ########################");
+console.log("--- Searching entire 'req' object for 'x-api-key' ---");
 
-      let valueToPrint;
+  /**
+   * Recursively searches for a key within a nested object.
+   * @param {object} objectToSearch - The object to search inside (e.g., req).
+   * @param {string} targetKey - The key we are looking for (e.g., 'x-api-key').
+   * @param {string} currentPath - The string representing the current path.
+   * @param {Set} visited - A set to track visited objects to prevent infinite loops from circular references.
+   */
+  function findKeyPath(objectToSearch, targetKey, currentPath = 'req', visited = new Set()) {
+    // Stop if the object is null or not an object, or if we've seen it before.
+    if (objectToSearch === null || typeof objectToSearch !== 'object' || visited.has(objectToSearch)) {
+      return;
+    }
+    
+    // Mark the current object as visited to avoid infinite loops.
+    visited.add(objectToSearch);
 
-      // Decide how to print the value based on its type
-      if (type === 'object' && value !== null) {
-        // For objects (like headers, body, query), we try to convert them to a JSON string.
-        // This is safer than logging the object directly.
-        try {
-          valueToPrint = JSON.stringify(value);
-        } catch (error) {
-          // This will catch errors from circular references (e.g., in req.socket)
-          valueToPrint = `[Complex Object - Cannot be stringified]`;
+    // Loop through all keys in the current object
+    for (const key in objectToSearch) {
+      // Check only properties that belong to this object
+      if (Object.prototype.hasOwnProperty.call(objectToSearch, key)) {
+        const newPath = `${currentPath}.${key}`;
+        
+        // --- MATCH FOUND ---
+        // HTTP headers are case-insensitive, so we compare in lowercase.
+        if (key.toLowerCase() === targetKey.toLowerCase()) {
+          console.log(`\n!!! SUCCESS: Found key '${key}' at path: ${newPath} !!!`);
+          console.log(`Value: ${objectToSearch[key]}\n`);
         }
-      } else if (type === 'function') {
-        valueToPrint = `[Function: ${value.name}]`;
-      } else {
-        // For simple types like strings, numbers, booleans
-        valueToPrint = value;
+
+        // --- RECURSIVE STEP ---
+        // If the value of the current key is another object, search inside it.
+        const value = objectToSearch[key];
+        if (typeof value === 'object') {
+          findKeyPath(value, targetKey, newPath, visited);
+        }
       }
-      
-      console.log(`Key: "${key}", Type: "${type}", Value:`, valueToPrint);
     }
   }
 
-  console.log("--- Finished Full Inspection of 'req' Object ---");
+  // Start the search from the top-level 'req' object.
+  findKeyPath(req, 'x-api-key');
+
+  console.log("--- Search Complete ---");
 
 
 
