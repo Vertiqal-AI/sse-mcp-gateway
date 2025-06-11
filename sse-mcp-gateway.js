@@ -123,8 +123,6 @@ mcp.stdout.on("data", (data) => {
 // 5. Define HTTP endpoints
 app.get("/sse", async (req, res) => {
   console.log("New SSE connection.");
-  app.get("/sse", async (req, res) => {
-  console.log("New SSE connection.");
   transport = new SSEServerTransport("/message", res);
   await server.connect(transport);
 });
@@ -132,7 +130,7 @@ app.get("/sse", async (req, res) => {
 app.post("/message", async (req, res) => {
   if (mcp.stdin.writable) {   
     
-    console.log('Method:', req.method);
+  console.log('Method:', req.method);
   console.log('URL:', req.url);
   console.log('Headers:', JSON.stringify(req.headers, null, 2));
   console.log('Body:', req.body);
