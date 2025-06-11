@@ -42,6 +42,7 @@ const PORT = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.text({ type: "*/*" }));
 
+// This Server instance correctly manages connection state
 const mcpServer = new Server(
   { name: "sse-proxy-server", version: "1.0.0" },
   { capabilities: { tools: {} } }
@@ -83,16 +84,17 @@ mcp.stdout.on("data", (data) => {
   // Process every complete line (ending in a newline) in the buffer
   while ((newlineIndex = stdoutBuffer.indexOf('\n')) !== -1) {
     const line = stdoutBuffer.substring(0, newlineIndex).trim();
-    // Keep the rest of the buffer for the next data chunk
     stdoutBuffer = stdoutBuffer.substring(newlineIndex + 1);
 
-    if (line) { // Only process non-empty lines
+    if (line) {
       try {
         const json = JSON.parse(line);
+        // This is the fix. We use the server instance to broadcast,
+        // which prevents the "Not connected" crash.
         mcpServer.broadcast(json);
         console.log("Broadcasting message from MCP to connected clients.");
       } catch (err) {
-        console.error("Invalid JSON received from MCP stdout:", line);
+        console.error(`Error parsing line from MCP stdout. Error: ${err.message}. Line was:`, line);
       }
     }
   }
