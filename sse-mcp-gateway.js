@@ -4,30 +4,57 @@ import { spawn } from "child_process";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import fs from "fs";
+import path from "path";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
-dotenv.config();
+// Load .env variables (if provided)
+const envFilePath = process.argv[3] || ".env";
+if (fs.existsSync(envFilePath)) {
+  dotenv.config({ path: envFilePath });
+}
 
-// --- API Key Validation ---
-let cleanApiKey = '';
-const dirtyApiKey = process.env.AIRTABLE_API_KEY || '';
-if (dirtyApiKey && dirtyApiKey.includes('pat')) {
-  cleanApiKey = dirtyApiKey.substring(dirtyApiKey.indexOf('pat'));
-  console.log(`✅ API Key Loaded and Cleaned.`);
-} else {
-  console.error('❌ FATAL: AIRTABLE_API_KEY is not defined or is invalid! Please set it in Railway.');
+// 1. Read MCP launch command from config file
+const configPath = process.argv[2] || "mcp-command.txt";
+if (!fs.existsSync(configPath)) {
+  console.error(`Missing MCP command file: ${configPath}`);
   process.exit(1);
 }
 
-// --- Spawn MCP Server ---
-const command = 'node';
-const mcpScriptPath = './airtable-mcp-src/build/index.js';
-const args = [ mcpScriptPath ];
-console.log(`Spawning MCP process with command: ${command} ${args[0]}`);
+const mcpCommand = fs.readFileSync(configPath, "utf8").trim().split(" ");
+const [command, ...args] = mcpCommand;
+
+let dirtyApiKey = process.env.AIRTABLE_API_KEY || '';
+let cleanApiKey = '';
+
+if (dirtyApiKey) {
+  // 2. Find the beginning of the real key, "pat"
+  const patIndex = dirtyApiKey.indexOf('pat');
+
+  if (patIndex !== -1) {
+    // 3. Slice the string from "pat" to the end. This strips all leading junk.
+    cleanApiKey = dirtyApiKey.substring(patIndex);
+    console.log(`✅ API Key CLEANED. It now starts with: ${cleanApiKey.substring(0, 3)}... and ends with: ...${cleanApiKey.slice(-2)}`);
+  } else {
+    console.error(`❌ CRITICAL: Found the key, but could not find the required 'pat...' sequence in it.`);
+  }
+} else {
+  console.error('❌ CRITICAL: AIRTABLE_API_KEY is NOT FOUND in the environment!');
+}
+
+
+// 2. Spawn the MCP process
+const safeArgsForLogging = [...args];
+if (safeArgsForLogging.length > 1) {
+  const key = safeArgsForLogging[1];
+  safeArgsForLogging[1] = `pat...${key.slice(-2)}`; // Mask the API key
+}
+console.log(`Spawning MCP process with command: ${command} ${safeArgsForLogging.join(' ')}`);
 
 const mcp = spawn(command, args, {
+  env: { ...process.env },
   stdio: ["pipe", "pipe", "pipe"],
-  env: { ...process.env, 'AIRTABLE_API_KEY': cleanApiKey }
 });
 
 // Listen for errors from the MCP process
