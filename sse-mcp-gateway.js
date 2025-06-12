@@ -122,19 +122,20 @@ mcp.stdout.on("data", (data) => {
 
 // 5. Define HTTP endpoints
 app.get("/sse", async (req, res) => {
+  const expectedApiKey = process.env.HEADER_AUTH;
+  const submittedApiKey = req.headers['x-api-key'];
+if (!expectedApiKey || !submittedApiKey || submittedApiKey !== expectedApiKey) {
+    console.error("Authentication failed. Invalid or missing API Key. Check HEADER_AUTH."); 
+    return res.status(401).send("Unauthorized");
+  }
+console.log("Authentication successful!");
+  
   console.log("New SSE connection.");
   transport = new SSEServerTransport("/message", res);
   await server.connect(transport);
 });
 
 app.post("/message", async (req, res) => {
-  const expectedApiKey = process.env.HEADER_AUTH;
-  const submittedApiKey = req.headers['x-api-key'];
-if (!expectedApiKey || !submittedApiKey || submittedApiKey !== expectedApiKey) {
-    console.error("Authentication failed. Invalid or missing API Key."); 
-    return res.status(401).send("Unauthorized");
-  }
-console.log("Authentication successful!");
 
   if (mcp.stdin.writable) {      
     const singleLineJson = JSON.stringify(JSON.parse(req.body));
