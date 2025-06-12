@@ -128,7 +128,17 @@ app.get("/sse", async (req, res) => {
 });
 
 app.post("/message", async (req, res) => {
-  if (mcp.stdin.writable) {   
+  if (mcp.stdin.writable) {  
+    if 
+    const req.headers['x-api-key'];
+    if (apiKey) {
+    // If it exists, print its value.
+    console.log("SUCCESS: Found X-API-Key header with value:", apiKey);
+  } else {
+    // If it does not exist, print a message.
+    console.log("INFO: No X-API-Key header was found in the request.");
+  }
+    
     const singleLineJson = JSON.stringify(JSON.parse(req.body));
     mcp.stdin.write(singleLineJson + "\n");
     res.sendStatus(202);
