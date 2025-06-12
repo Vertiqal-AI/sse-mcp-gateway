@@ -129,7 +129,6 @@ app.get("/sse", async (req, res) => {
 
 app.post("/message", async (req, res) => {
   if (mcp.stdin.writable) {  
-    if 
     const apiKey = req.headers['x-api-key'];
     if (apiKey) {
     // If it exists, print its value.
